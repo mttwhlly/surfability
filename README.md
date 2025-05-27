@@ -1,20 +1,28 @@
 # Surfability API
 
-A simple REST API that provides real-time surf condition assessments for St. Augustine, Florida. The API combines data from NOAA buoys, marine weather forecasts, and wind conditions to determine if the surf is worth checking out.
+A robust REST API that provides real-time surf condition assessments for St. Augustine, Florida. The API combines data from NOAA buoys, marine weather forecasts, and wind conditions to determine if the surf is worth checking out.
 
-## Features
+## 🌊 Features
 
 - **Real-time surf scoring** - Get a numerical score (0-100) indicating surf quality
 - **Surfability rating** - Simple Excellent/Fun/Marginal rating system
 - **Duration forecasts** - Find out how long good conditions will last
 - **Multiple data sources** - Combines NOAA buoy data with weather APIs for accuracy
 - **Robust fallbacks** - Always provides a response even if some data sources are unavailable
+- **Data validation** - Filters out invalid buoy readings and impossible wave measurements
+- **Consistent logic** - Current conditions and forecasts use the same evaluation criteria
 
-## Quick Start
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js 18+ 
+- npm or yarn
 
 ### Installation
 
 ```bash
+git clone https://github.com/mttwhlly/surfability.git
+cd surfability
 npm install
 ```
 
@@ -33,7 +41,15 @@ npm run build
 npm start
 ```
 
-## API Endpoints
+### Docker Deployment
+
+```bash
+# Build and run with Docker
+docker build -t surfability-api .
+docker run -p 3000:3000 surfability-api
+```
+
+## 📡 API Endpoints
 
 ### GET `/surfability`
 
@@ -62,7 +78,7 @@ Returns current surf conditions and forecast for St. Augustine, FL.
 
 ### GET `/health`
 
-Simple health check endpoint.
+Health check endpoint for monitoring and load balancers.
 
 **Example Response:**
 ```json
@@ -72,105 +88,232 @@ Simple health check endpoint.
 }
 ```
 
-## Surf Scoring System
+## 🏄‍♂️ Surf Scoring System
 
 The API evaluates surf conditions based on several factors:
 
-| Factor | Ideal Conditions | Points |
-|--------|------------------|---------|
-| **Wave Height** | 2-8 feet | 25 pts |
-| **Wave Period** | 10+ seconds | 25 pts |
-| **Swell Direction** | East to Southeast (45-135°) | 20 pts |
-| **Wind** | Offshore (W-NW) or light (<10 kts) | 20 pts |
-| **Tide** | Mid, Rising, or Falling | 10 pts |
+| Factor | Ideal Conditions | Points | Notes |
+|--------|------------------|---------|-------|
+| **Wave Height** | 2-8 feet | 25 pts | Small but rideable waves get 15 pts |
+| **Wave Period** | 10+ seconds | 25 pts | 7-9s gets 20 pts, 5-6s gets 10 pts |
+| **Swell Direction** | East to Southeast (45-135°) | 20 pts | Perfect for Florida's Atlantic coast |
+| **Wind** | Offshore (W-NW) or light (<10 kts) | 20 pts | Offshore winds clean up the waves |
+| **Tide** | Mid, Rising, or Falling | 10 pts | Avoids extreme high/low tide issues |
 
 ### Rating Scale
-- **Excellent** (75+ points) - Epic conditions, drop everything and surf
-- **Fun** (50-74 points) - Good waves worth surfing
-- **Marginal** (<50 points) - Might be surfable but not ideal
+- **Excellent** (75+ points) - Epic conditions, drop everything and surf! 🤙
+- **Fun** (50-74 points) - Good waves worth surfing 🏄‍♂️
+- **Marginal** (<50 points) - Might be surfable but not ideal 😐
 
-## Data Sources
+### Surfability Threshold
+- **Surfable**: Score ≥ 40 points
+- **Not Surfable**: Score < 40 points
 
-1. **NOAA Buoy 41117** - Real-time wave measurements (most accurate)
+## 📊 Data Sources & Reliability
+
+### Primary Data Sources
+1. **NOAA Buoy 41117** - Real-time wave measurements (most accurate when available)
 2. **Open-Meteo Marine API** - Wave height, period, and direction forecasts
-3. **Open-Meteo Weather API** - Wind speed and direction
+3. **Open-Meteo Weather API** - Wind speed and direction data
 4. **Simple Tide Calculator** - Basic tide state estimation
 
-## Configuration
+### Data Quality & Validation
+- **Buoy data validation** - Rejects impossible readings (e.g., 0.1 second wave periods)
+- **Range checking** - Wave periods must be 2-30 seconds, heights 0-20 meters
+- **Fallback hierarchy** - NOAA Buoy → Marine API → Sensible defaults
+- **Consistency checks** - Current conditions and forecasts use same logic
 
-The API is currently configured for St. Augustine, Florida coordinates:
-- Latitude: 29.9°N
-- Longitude: -81.3°W
-- NOAA Buoy: Station 41117
+### Data Source Priority
+```
+1. NOAA Buoy (real-time, most accurate)
+   ↓ (if unavailable or invalid)
+2. Marine API (forecast data)
+   ↓ (if unavailable)
+3. Reasonable defaults (1.5ft waves, 6s period, East swell)
+```
 
-To modify for a different location, update the coordinates and buoy station in `index.ts`.
+### Expected Data Sources in Response
+- `"NOAA Buoy + Weather API"` - Best case, real buoy data + wind
+- `"Marine + Weather API"` - Marine forecast + wind data  
+- `"Weather API + defaults"` - Wind data + fallback wave values
 
-## Environment Variables
+## ⚙️ Configuration
+
+### Location Settings
+The API is currently configured for St. Augustine, Florida:
+- **Latitude**: 29.9°N
+- **Longitude**: -81.3°W  
+- **NOAA Buoy**: Station 41117
+- **Timezone**: America/New_York
+
+### Modifying for Different Locations
+To adapt for another surf spot, update these values in `index.ts`:
+```typescript
+// Change coordinates and buoy station
+const lat = 29.9;  // Your latitude
+const lon = -81.3; // Your longitude
+const buoyStation = '41117'; // Nearest NOAA buoy
+```
+
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | 3000 | Server port |
+| `NODE_ENV` | development | Environment (production/development) |
 
-## Development
+## 🐳 Docker Support
+
+### Dockerfile Features
+- **Multi-stage build** - Optimized for production
+- **Health checks** - Built-in endpoint monitoring
+- **Alpine Linux** - Small, secure base image
+- **Curl included** - For health check functionality
+
+### Docker Commands
+```bash
+# Build image
+docker build -t surfability-api .
+
+# Run container
+docker run -p 3000:3000 surfability-api
+
+# With environment variables
+docker run -p 3000:3000 -e NODE_ENV=production surfability-api
+```
+
+## 🛠️ Development
 
 ### Project Structure
 
 ```
 surfability/
-├── index.ts          # Main API server
+├── index.ts          # Main API server and logic
 ├── package.json      # Dependencies and scripts
 ├── tsconfig.json     # TypeScript configuration
+├── Dockerfile        # Container configuration
+├── .dockerignore     # Docker build exclusions
+├── .gitignore        # Git exclusions
 └── README.md         # This file
 ```
 
-### Scripts
+### Available Scripts
 
-- `npm run dev` - Start development server with hot reload
+- `npm run dev` - Start development server with hot reload (tsx)
 - `npm run build` - Compile TypeScript to JavaScript
 - `npm start` - Run production server
 - `npm run lint` - Run linting (if configured)
 
 ### Technologies Used
 
-- **Node.js** - Runtime environment
-- **Express** - Web framework
-- **TypeScript** - Type safety
-- **tsx** - TypeScript execution and hot reload
-- **Open-Meteo APIs** - Weather and marine data
-- **NOAA NDBC** - Real-time buoy data
+- **Node.js 18+** - Runtime environment
+- **Express 5** - Web framework  
+- **TypeScript** - Type safety and modern JavaScript
+- **tsx** - Fast TypeScript execution and hot reload
+- **Open-Meteo APIs** - Weather and marine forecast data
+- **NOAA NDBC** - Real-time buoy measurements
 
-## API Reliability
+## 🔧 Troubleshooting
 
-The API is designed to be highly reliable with multiple fallback strategies:
+### Common Issues
 
-1. If NOAA buoy data fails → Use marine API data
-2. If marine API fails → Use reasonable defaults
-3. If all external APIs fail → Return error with helpful message
+**Q: Why does `surfable: false` but `goodSurfDuration: "Good surf for most of the day"`?**
+A: This was a bug in earlier versions where current conditions and forecasts used different data sources. Current version ensures consistency.
 
-This ensures the API always provides a response, even during external service outages.
+**Q: API returns "Weather API + defaults" - is this accurate?**  
+A: When buoy and marine APIs are unavailable, the API uses conservative defaults (1.5ft waves, 6s period). This ensures the API always responds but may be less accurate.
 
-## Rate Limits
+**Q: Wave period shows impossible values like 0.1 seconds**
+A: Earlier versions had buoy parsing issues. Current version validates data and rejects impossible readings.
 
-- Open-Meteo APIs: Free for non-commercial use (up to 10,000 calls/day)
-- NOAA NDBC: No official rate limits, but be respectful
+### Debug Logging
 
-## License
+The API includes console logging for debugging data source issues:
+```bash
+# View logs in production
+docker logs <container-name>
 
-MIT License - feel free to use this for your own surf forecasting needs!
+# View logs in development  
+npm run dev
+# Check console output for data source debugging
+```
 
-## Contributing
+## 🚢 Deployment
 
-This is a simple surf forecasting API. Feel free to fork and modify for your local surf spot. Pull requests welcome for improvements!
+### Recommended: Docker + Coolify
+
+1. **Push to GitHub**
+2. **Create Coolify Application**
+   - Repository: `https://github.com/yourusername/surfability.git`
+   - Build Pack: `Dockerfile`
+   - Port: `3000`
+   - Health Check: `/health`
+
+3. **Environment Variables**
+   - `NODE_ENV=production`
+   - `PORT=3000`
+
+### Alternative: Heroku, Railway, DigitalOcean
+
+The API works on any platform supporting Node.js or Docker containers.
+
+## 📈 Monitoring & Reliability
+
+### Health Checks
+- Built-in `/health` endpoint
+- Docker health check every 30 seconds
+- Graceful error handling for external API failures
+
+### Rate Limits & Fair Use
+- **Open-Meteo APIs**: Free for non-commercial use (up to 10,000 calls/day)
+- **NOAA NDBC**: No official limits, but be respectful
+- **Recommended**: Cache responses for 5-15 minutes to reduce API calls
+
+### Error Handling
+The API is designed to always return a valid response:
+- External API failures → Use fallback data
+- Invalid buoy data → Filter out and use alternatives  
+- Network timeouts → Graceful degradation
+- Malformed requests → Clear error messages
+
+## 📄 License
+
+MIT License - Feel free to use this for your own surf forecasting needs!
+
+## 🤝 Contributing
+
+This is a community-driven surf forecasting API. Contributions welcome!
 
 ### Ideas for Enhancement
 
-- Add more surf spots
-- Integrate real tide data
-- Add swell forecasting
-- Include surf reports/photos
-- Add email/SMS notifications for good conditions
-- Mobile app integration
+- **🌍 Multi-location support** - Add more surf spots
+- **🌊 Real tide integration** - Replace simple calculator with actual tide data
+- **📱 Mobile app** - React Native or Flutter companion app
+- **📧 Notifications** - Email/SMS alerts for good conditions
+- **📸 Surf reports** - Integrate with local surf cams/reports
+- **🤖 ML forecasting** - Improve predictions with historical data
+- **⚡ Caching layer** - Redis for improved performance
+- **📊 Analytics** - Track forecast accuracy over time
 
-## Disclaimer
+### Development Setup
+
+```bash
+# Fork the repo and clone
+git clone https://github.com/yourusername/surfability.git
+cd surfability
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+
+# Make changes and test
+# Submit pull request
+```
+
+## ⚠️ Disclaimer
 
 This API is for informational purposes only. Always check local conditions and use proper safety precautions when surfing. Wave and weather conditions can change rapidly and may differ from forecasts.
+
+**Surf safe, have fun!** 🏄‍♂️🌊
