@@ -85,28 +85,60 @@ function parseBuoyData(buoyText: string): { waveHeight: number; swellDirection: 
     const lines = buoyText.trim().split('\n');
     if (lines.length < 3) return null;
     
+    // Find the header line to understand column positions
+    const headerLine = lines.find(line => line.includes('WVHT') && line.includes('DPD'));
+    if (!headerLine) {
+      console.log('Could not find header line with WVHT and DPD');
+      return null;
+    }
+    
     // Skip header lines and get the most recent data
     const dataLine = lines.find(line => 
       line.trim() && 
       !line.startsWith('#') && 
       !line.includes('YY') && 
-      !line.includes('MM')
+      !line.includes('MM') &&
+      !line.includes('WVHT')
     );
     
-    if (!dataLine) return null;
-    
-    const parts = dataLine.trim().split(/\s+/);
-    if (parts.length < 8) return null;
-    
-    // NDBC format: YY MM DD hh mm WVHT DPD APD MWD
-    // Wave height is typically in column 5 (index 5), period in 6, direction in 8
-    const waveHeight = parseFloat(parts[5]) * 3.28084; // Convert meters to feet
-    const wavePeriod = parseFloat(parts[6]); // Dominant wave period
-    const swellDirection = parseFloat(parts[8]); // Mean wave direction
-    
-    if (isNaN(waveHeight) || isNaN(wavePeriod) || isNaN(swellDirection)) {
+    if (!dataLine) {
+      console.log('Could not find valid data line');
       return null;
     }
+    
+    const parts = dataLine.trim().split(/\s+/);
+    console.log('Buoy data parts:', parts);
+    
+    if (parts.length < 8) {
+      console.log('Not enough data columns:', parts.length);
+      return null;
+    }
+    
+    // NDBC format: YY MM DD hh mm WVHT DPD APD MWD PRES ATMP WTMP DEW VIS
+    // Indices:     0  1  2  3  4  5    6   7   8   9    10   11   12  13
+    const waveHeightMeters = parseFloat(parts[5]); // WVHT (significant wave height in meters)
+    const wavePeriod = parseFloat(parts[6]);       // DPD (dominant wave period in seconds)  
+    const swellDirection = parseFloat(parts[8]);   // MWD (mean wave direction in degrees)
+    
+    // Validate the data makes sense
+    if (isNaN(waveHeightMeters) || isNaN(wavePeriod) || isNaN(swellDirection)) {
+      console.log('Invalid numeric data:', { waveHeightMeters, wavePeriod, swellDirection });
+      return null;
+    }
+    
+    if (wavePeriod < 2 || wavePeriod > 30) {
+      console.log('Wave period out of reasonable range:', wavePeriod);
+      return null;
+    }
+    
+    if (waveHeightMeters < 0 || waveHeightMeters > 20) {
+      console.log('Wave height out of reasonable range:', waveHeightMeters);
+      return null;
+    }
+    
+    const waveHeight = waveHeightMeters * 3.28084; // Convert meters to feet
+    
+    console.log('Parsed buoy data:', { waveHeight, wavePeriod, swellDirection });
     
     return { waveHeight, swellDirection, wavePeriod };
   } catch (error) {
@@ -257,11 +289,20 @@ app.get('/surfability', async (_req: Request, res: Response) => {
 
     // Use buoy data if available, otherwise try marine API, then use fallback values
     const waveHeight = buoyData?.waveHeight ?? 
-                       (marineJson?.hourly?.wave_height?.[0] ? marineJson.hourly.wave_height[0] * 3.28084 : 2.5);
+                       (marineJson?.hourly?.wave_height?.[0] ? marineJson.hourly.wave_height[0] * 3.28084 : 1.5);
     const wavePeriod = buoyData?.wavePeriod ?? 
-                       marineJson?.hourly?.wave_period?.[0] ?? 8;
+                       marineJson?.hourly?.wave_period?.[0] ?? 6;
     const swellDirection = buoyData?.swellDirection ?? 
                           marineJson?.hourly?.swell_wave_direction?.[0] ?? 90;
+
+    // Debug logging
+    console.log('Current conditions source:', {
+      buoyData: !!buoyData,
+      marineData: !!marineJson?.hourly,
+      waveHeight,
+      wavePeriod,
+      swellDirection
+    });
 
     const windSpeed = weatherJson.current.wind_speed_10m * 1.94384; // Convert m/s to knots
     const windDirection = weatherJson.current.wind_direction_10m;
@@ -283,8 +324,8 @@ app.get('/surfability', async (_req: Request, res: Response) => {
     // Parse hourly forecast - combine available data
     const hourlyForecasts: HourlyForecast[] = weatherJson.hourly.time.map((timeStr: string, i: number) => ({
       time: timeStr,
-      wave_height: marineJson?.hourly?.wave_height?.[i] ?? 2.5, // Default 2.5ft waves
-      wave_period: marineJson?.hourly?.wave_period?.[i] ?? 8,   // Default 8 second period
+      wave_height: marineJson?.hourly?.wave_height?.[i] ?? 1.5, // Use more realistic default
+      wave_period: marineJson?.hourly?.wave_period?.[i] ?? 6,   // Use more realistic default  
       swell_direction: marineJson?.hourly?.swell_wave_direction?.[i] ?? 90, // Default East
       wind_speed: weatherJson.hourly.wind_speed_10m[i],
       wind_direction: weatherJson.hourly.wind_direction_10m[i],
