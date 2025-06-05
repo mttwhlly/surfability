@@ -13,7 +13,12 @@
     "type": "git",
     "url": "git+https://github.com/mttwhlly/surfability.git"
   },
-  "keywords": ["surf", "weather", "api", "forecast"],
+  "keywords": [
+    "surf",
+    "weather",
+    "api",
+    "forecast"
+  ],
   "author": "",
   "license": "ISC",
   "bugs": {
@@ -23,6 +28,7 @@
   "dependencies": {
     "@types/express": "^5.0.2",
     "@types/node": "^22.15.21",
+    "cors": "^2.8.5",
     "express": "^5.1.0",
     "node-fetch": "^3.3.2",
     "typescript": "^5.3.3"
