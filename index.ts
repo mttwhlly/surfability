@@ -1,7 +1,47 @@
 import express, { Request, Response } from 'express';
+import cors from 'cors';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// CORS configuration - this is the key fix!
+const corsOptions = {
+  origin: [
+    'https://localhost:8444',  // Your local development
+    'http://localhost:8444',
+    'https://localhost:3000',
+    'http://localhost:3000',
+    'https://127.0.0.1:8444',
+    'http://127.0.0.1:8444',
+    // Add your production domain when you deploy
+    // 'https://your-domain.com'
+  ],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Accept'],
+  credentials: true
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
+app.use(express.json());
+
+// Add additional CORS headers for extra compatibility
+app.use((req: Request, res: Response, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
 
 interface SurfData {
   waveHeight: number;
@@ -208,10 +248,10 @@ function getGoodSurfDuration(hourlyForecasts: HourlyForecast[], tide: string): s
   else return 'Good surf for most of the day!';
 }
 
-app.use(express.json());
-
-app.get('/surfability', async (_req: Request, res: Response) => {
+app.get('/surfability', async (req: Request, res: Response) => {
   try {
+    console.log('Surfability request from:', req.headers.origin);
+    
     // Fetch buoy data with error handling
     let buoyData = null;
     try {
@@ -365,4 +405,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => console.log(`Surfability API running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Surfability API running on port ${PORT}`);
+  console.log('CORS enabled for local development');
+});

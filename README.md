@@ -120,8 +120,8 @@ The API evaluates surf conditions based on several factors:
 ### Data Quality & Validation
 - **Buoy data validation** - Rejects impossible readings (e.g., 0.1 second wave periods)
 - **Range checking** - Wave periods must be 2-30 seconds, heights 0-20 meters
-- **Fallback hierarchy** - NOAA Buoy → Marine API → Sensible defaults
-- **Consistency checks** - Current conditions and forecasts use same logic
+- **Fail-fast approach** - Returns error if no reliable wave data is available
+- **No false data** - Won't return surf conditions without actual wave measurements
 
 ### Data Source Priority
 ```
@@ -129,13 +129,13 @@ The API evaluates surf conditions based on several factors:
    ↓ (if unavailable or invalid)
 2. Marine API (forecast data)
    ↓ (if unavailable)
-3. Reasonable defaults (1.5ft waves, 6s period, East swell)
+3. Service unavailable error (honest about missing data)
 ```
 
 ### Expected Data Sources in Response
 - `"NOAA Buoy + Weather API"` - Best case, real buoy data + wind
 - `"Marine + Weather API"` - Marine forecast + wind data  
-- `"Weather API + defaults"` - Wind data + fallback wave values
+- **Service Error (503)** - When no reliable wave data is available
 
 ## ⚙️ Configuration
 
@@ -217,14 +217,14 @@ surfability/
 
 ### Common Issues
 
-**Q: Why does `surfable: false` but `goodSurfDuration: "Good surf for most of the day"`?**
-A: This was a bug in earlier versions where current conditions and forecasts used different data sources. Current version ensures consistency.
+**Q: Why does the API sometimes return a 503 error?**
+A: When neither NOAA buoy nor marine forecast data is available, the API returns a 503 "Service Unavailable" error rather than making up wave data. This ensures you get honest information about surf conditions.
 
-**Q: API returns "Weather API + defaults" - is this accurate?**  
-A: When buoy and marine APIs are unavailable, the API uses conservative defaults (1.5ft waves, 6s period). This ensures the API always responds but may be less accurate.
+**Q: What should I do when I get "Insufficient wave data"?**  
+A: Try again in a few minutes, or check local surf reports and webcams. The API prioritizes accuracy over always being available.
 
-**Q: Wave period shows impossible values like 0.1 seconds**
-A: Earlier versions had buoy parsing issues. Current version validates data and rejects impossible readings.
+**Q: Why not just use default wave values when real data isn't available?**
+A: Surf conditions change rapidly and fake data could be dangerously misleading. It's better to admit when we don't know than to guess.
 
 ### Debug Logging
 
@@ -270,11 +270,14 @@ The API works on any platform supporting Node.js or Docker containers.
 - **Recommended**: Cache responses for 5-15 minutes to reduce API calls
 
 ### Error Handling
-The API is designed to always return a valid response:
-- External API failures → Use fallback data
-- Invalid buoy data → Filter out and use alternatives  
-- Network timeouts → Graceful degradation
-- Malformed requests → Clear error messages
+The API prioritizes **accuracy over availability**:
+- External API failures → Return 503 error with explanation
+- Invalid buoy data → Filter out and try marine API
+- No wave data available → Honest error message
+- Network timeouts → Clear error with retry suggestion
+- Malformed requests → Helpful error messages
+
+**Philosophy**: Better to admit we don't know than to provide potentially dangerous misinformation about surf conditions.
 
 ## 📄 License
 
