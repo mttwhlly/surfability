@@ -55,7 +55,8 @@ interface SurfData {
 interface SurfabilityResult {
   score: number;
   surfable: boolean;
-  rating: 'Excellent' | 'Fun' | 'Marginal';
+  rating: string;
+  funRating: string;
 }
 
 interface HourlyForecast {
@@ -65,6 +66,56 @@ interface HourlyForecast {
   swell_direction: number;
   wind_speed: number;
   wind_direction: number;
+}
+
+// Fun surf rating phrases with some attitude
+const surfRatings = {
+  excellent: [
+    "Epic",
+    "Firing",
+    "Going Off",
+    "Pumping",
+    "Primo",
+    "Cranking",
+    "Nuking"
+  ],
+  good: [
+    "Fun",
+    "Solid",
+    "Decent",
+    "Surfable",
+    "Worth It",
+    "Not Bad",
+    "Rideable"
+  ],
+  marginal: [
+    "Marginal", 
+    "Questionable",
+    "Sketchy",
+    "Iffy",
+    "Meh",
+    "Barely",
+    "Struggling"
+  ],
+  poor: [
+    "Flat",
+    "Blown Out",
+    "Junk",
+    "Trash",
+    "Hopeless",
+    "Closed Out",
+    "Victory at Sea",
+    "Ankle Biters",
+    "Lake Mode",
+    "Check the Cam",
+    "Stay Home",
+    "Netflix Day"
+  ]
+};
+
+function getRandomRating(category: keyof typeof surfRatings): string {
+  const options = surfRatings[category];
+  return options[Math.floor(Math.random() * options.length)];
 }
 
 function calculateSurfability(data: SurfData): SurfabilityResult {
@@ -109,14 +160,28 @@ function calculateSurfability(data: SurfData): SurfabilityResult {
     score += 10;
   }
 
-  let rating: 'Excellent' | 'Fun' | 'Marginal' = 'Marginal';
-  if (score >= 75) rating = 'Excellent';
-  else if (score >= 50) rating = 'Fun';
+  let rating: string;
+  let funRating: string;
+  
+  if (score >= 80) {
+    rating = 'Excellent';
+    funRating = getRandomRating('excellent');
+  } else if (score >= 65) {
+    rating = 'Good';
+    funRating = getRandomRating('good');
+  } else if (score >= 45) {
+    rating = 'Marginal';
+    funRating = getRandomRating('marginal');
+  } else {
+    rating = 'Poor';
+    funRating = getRandomRating('poor');
+  }
 
   return {
     score,
-    surfable: score >= 40, // Lower threshold for surfability
+    surfable: score >= 45, // Raised threshold - only call it surfable if it's actually decent
     rating,
+    funRating,
   };
 }
 
@@ -199,7 +264,7 @@ function getSimpleTideState(): string {
   else return 'Falling';
 }
 
-function getGoodSurfDuration(hourlyForecasts: HourlyForecast[], tide: string): string {
+function getConditionsDuration(hourlyForecasts: HourlyForecast[], tide: string): string {
   if (!hourlyForecasts || hourlyForecasts.length === 0) {
     return 'No forecast data available.';
   }
@@ -210,8 +275,12 @@ function getGoodSurfDuration(hourlyForecasts: HourlyForecast[], tide: string): s
     return forecastTime >= now;
   }).slice(0, 24); // Only look at next 24 hours
 
-  let maxDurationHours = 0;
-  let currentStreak = 0;
+  // Track different quality streaks
+  let goodStreaks: number[] = [];
+  let marginalStreaks: number[] = [];
+  let currentGoodStreak = 0;
+  let currentMarginalStreak = 0;
+  let totalSurfableHours = 0;
 
   for (let i = 0; i < futureForecasts.length; i++) {
     const hourData = futureForecasts[i];
@@ -226,26 +295,69 @@ function getGoodSurfDuration(hourlyForecasts: HourlyForecast[], tide: string): s
     
     const result = calculateSurfability(surfData);
 
-    if (result.surfable) {
-      currentStreak++;
-    } else {
-      if (currentStreak > maxDurationHours) {
-        maxDurationHours = currentStreak;
+    if (result.score >= 65) { // Good conditions
+      currentGoodStreak++;
+      if (currentMarginalStreak > 0) {
+        marginalStreaks.push(currentMarginalStreak);
+        currentMarginalStreak = 0;
       }
-      currentStreak = 0;
+      totalSurfableHours++;
+    } else if (result.score >= 45) { // Marginal but surfable
+      currentMarginalStreak++;
+      if (currentGoodStreak > 0) {
+        goodStreaks.push(currentGoodStreak);
+        currentGoodStreak = 0;
+      }
+      totalSurfableHours++;
+    } else { // Poor conditions
+      if (currentGoodStreak > 0) {
+        goodStreaks.push(currentGoodStreak);
+        currentGoodStreak = 0;
+      }
+      if (currentMarginalStreak > 0) {
+        marginalStreaks.push(currentMarginalStreak);
+        currentMarginalStreak = 0;
+      }
     }
   }
 
-  // Check final streak
-  if (currentStreak > maxDurationHours) {
-    maxDurationHours = currentStreak;
-  }
+  // Add final streaks
+  if (currentGoodStreak > 0) goodStreaks.push(currentGoodStreak);
+  if (currentMarginalStreak > 0) marginalStreaks.push(currentMarginalStreak);
 
-  if (maxDurationHours === 0) return 'No good surf expected in next 24 hours';
-  else if (maxDurationHours === 1) return 'Good surf for about 1 hour';
-  else if (maxDurationHours <= 3) return `Good surf for about ${maxDurationHours} hours`;
-  else if (maxDurationHours <= 6) return `Good surf for ${maxDurationHours} hours`;
-  else return 'Good surf for most of the day!';
+  const maxGoodStreak = goodStreaks.length > 0 ? Math.max(...goodStreaks) : 0;
+  const maxMarginalStreak = marginalStreaks.length > 0 ? Math.max(...marginalStreaks) : 0;
+
+  // Generate fun, condition-appropriate messages
+  if (maxGoodStreak >= 8) {
+    return 'Good surf for most of the day! 🤙';
+  } else if (maxGoodStreak >= 6) {
+    return `Good surf for ${maxGoodStreak} solid hours!`;
+  } else if (maxGoodStreak >= 3) {
+    return `Good surf for about ${maxGoodStreak} hours`;
+  } else if (maxGoodStreak >= 1) {
+    return `Brief good surf window (~${maxGoodStreak}hr)`;
+  } else if (maxMarginalStreak >= 8) {
+    return 'Marginal conditions for most of the day';
+  } else if (maxMarginalStreak >= 4) {
+    return `Marginal conditions for ${maxMarginalStreak} hours`;
+  } else if (maxMarginalStreak >= 2) {
+    return `Sketchy conditions for ${maxMarginalStreak} hours`;
+  } else if (totalSurfableHours >= 1) {
+    return 'Brief surfable windows expected';
+  } else {
+    // Brutally honest messages for flat/poor conditions
+    const flatMessages = [
+      'Flat spell continues...',
+      'Time to practice your pop-ups on land',
+      'Great day for a beach walk',
+      'Maybe check the bay?',
+      'Longboard day if you\'re desperate',
+      'Netflix has some good surf movies',
+      'Perfect time to wax your board'
+    ];
+    return flatMessages[Math.floor(Math.random() * flatMessages.length)];
+  }
 }
 
 app.get('/surfability', async (req: Request, res: Response) => {
@@ -359,7 +471,7 @@ app.get('/surfability', async (req: Request, res: Response) => {
       tide,
     };
 
-    const { score, surfable, rating } = calculateSurfability(currentSurfData);
+    const { score, surfable, rating, funRating } = calculateSurfability(currentSurfData);
 
     // Parse hourly forecast - combine available data
     const hourlyForecasts: HourlyForecast[] = weatherJson.hourly.time.map((timeStr: string, i: number) => ({
@@ -371,16 +483,16 @@ app.get('/surfability', async (req: Request, res: Response) => {
       wind_direction: weatherJson.hourly.wind_direction_10m[i],
     }));
 
-    const goodSurfDuration = getGoodSurfDuration(hourlyForecasts, tide);
+    const conditionsDuration = getConditionsDuration(hourlyForecasts, tide);
 
     // Response
     res.json({
       location: 'St. Augustine, FL',
       timestamp: new Date().toISOString(),
       surfable,
-      rating,
+      rating: funRating, // Use the fun rating as the main rating
       score,
-      goodSurfDuration,
+      goodSurfDuration: conditionsDuration, // Renamed to be more accurate
       details: {
         wave_height_ft: Math.round(currentSurfData.waveHeight * 10) / 10,
         wave_period_sec: Math.round(currentSurfData.wavePeriod * 10) / 10,
@@ -388,7 +500,8 @@ app.get('/surfability', async (req: Request, res: Response) => {
         wind_direction_deg: Math.round(currentSurfData.windDirection),
         wind_speed_kts: Math.round(currentSurfData.windSpeed * 10) / 10,
         tide_state: tide,
-        data_source: buoyData ? 'NOAA Buoy + Weather API' : (marineJson?.hourly ? 'Marine + Weather API' : 'Weather API + defaults')
+        data_source: buoyData ? 'NOAA Buoy + Weather API' : (marineJson?.hourly ? 'Marine + Weather API' : 'Weather API + defaults'),
+        traditional_rating: rating // Keep the traditional rating for reference
       },
     });
   } catch (err) {
