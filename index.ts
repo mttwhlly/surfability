@@ -456,7 +456,7 @@ app.get('/surfability', async (req: Request, res: Response) => {
       swellDirection
     });
 
-    const windSpeed = weatherJson.current.wind_speed_10m * 1.94384; // Convert m/s to knots
+    const windSpeed = weatherJson.current.wind_speed_10m * 0.539957; // Convert to knots
     const windDirection = weatherJson.current.wind_direction_10m;
 
     const tide = getSimpleTideState();
