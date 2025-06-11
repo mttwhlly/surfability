@@ -289,7 +289,7 @@ function getConditionsDuration(hourlyForecasts: HourlyForecast[], tide: string):
       wavePeriod: hourData.wave_period,
       swellDirection: hourData.swell_direction,
       windDirection: hourData.wind_direction,
-      windSpeed: hourData.wind_speed * 1.94384, // Convert m/s to knots
+      windSpeed: hourData.wind_speed * 0.539957, // Convert m/s to knots
       tide,
     };
     
