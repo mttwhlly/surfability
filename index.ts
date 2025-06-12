@@ -52,6 +52,13 @@ interface SurfData {
   tide: string;
 }
 
+interface WeatherData {
+  airTemperature: number;
+  waterTemperature: number;
+  weatherCode: number;
+  weatherDescription: string;
+}
+
 interface SurfabilityResult {
   score: number;
   surfable: boolean;
@@ -113,9 +120,45 @@ const surfRatings = {
   ]
 };
 
+// Weather code descriptions based on WMO codes
+const weatherDescriptions: { [key: number]: string } = {
+  0: "Clear sky",
+  1: "Mainly clear",
+  2: "Partly cloudy", 
+  3: "Overcast",
+  45: "Fog",
+  48: "Depositing rime fog",
+  51: "Light drizzle",
+  53: "Moderate drizzle",
+  55: "Dense drizzle",
+  56: "Light freezing drizzle",
+  57: "Dense freezing drizzle",
+  61: "Slight rain",
+  63: "Moderate rain",
+  65: "Heavy rain",
+  66: "Light freezing rain",
+  67: "Heavy freezing rain",
+  71: "Slight snow fall",
+  73: "Moderate snow fall",
+  75: "Heavy snow fall",
+  77: "Snow grains",
+  80: "Slight rain showers",
+  81: "Moderate rain showers",
+  82: "Violent rain showers",
+  85: "Slight snow showers",
+  86: "Heavy snow showers",
+  95: "Thunderstorm",
+  96: "Thunderstorm with slight hail",
+  99: "Thunderstorm with heavy hail"
+};
+
 function getRandomRating(category: keyof typeof surfRatings): string {
   const options = surfRatings[category];
   return options[Math.floor(Math.random() * options.length)];
+}
+
+function getWeatherDescription(code: number): string {
+  return weatherDescriptions[code] || "Unknown conditions";
 }
 
 function calculateSurfability(data: SurfData): SurfabilityResult {
@@ -289,7 +332,7 @@ function getConditionsDuration(hourlyForecasts: HourlyForecast[], tide: string):
       wavePeriod: hourData.wave_period,
       swellDirection: hourData.swell_direction,
       windDirection: hourData.wind_direction,
-      windSpeed: hourData.wind_speed * 1.94384, // Convert m/s to knots
+      windSpeed: hourData.wind_speed * 0.539957, // Convert m/s to knots
       tide,
     };
     
@@ -386,9 +429,9 @@ app.get('/surfability', async (req: Request, res: Response) => {
     let weatherJson = null;
 
     try {
-      // Try marine API first for wave data
+      // Try marine API first for wave data AND water temperature
       const marineRes = await fetch(
-        'https://api.open-meteo.com/v1/marine?latitude=29.9&longitude=-81.3&hourly=wave_height,wave_period,swell_wave_direction',
+        'https://api.open-meteo.com/v1/marine?latitude=29.9&longitude=-81.3&hourly=wave_height,wave_period,swell_wave_direction,sea_surface_temperature&current=sea_surface_temperature',
         {
           signal: AbortSignal.timeout(8000)
         }
@@ -403,9 +446,9 @@ app.get('/surfability', async (req: Request, res: Response) => {
       console.warn('Marine API failed, falling back to forecast API:', error);
     }
 
-    // Get regular weather data (wind + backup wave data)
+    // Get regular weather data (wind + air temperature + weather conditions)
     const weatherRes = await fetch(
-      'https://api.open-meteo.com/v1/forecast?latitude=29.9&longitude=-81.3&current=wind_speed_10m,wind_direction_10m&hourly=wind_speed_10m,wind_direction_10m&timezone=America/New_York&forecast_days=2',
+      'https://api.open-meteo.com/v1/forecast?latitude=29.9&longitude=-81.3&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m&hourly=wind_speed_10m,wind_direction_10m&timezone=America/New_York&forecast_days=2',
       {
         signal: AbortSignal.timeout(10000)
       }
@@ -416,16 +459,22 @@ app.get('/surfability', async (req: Request, res: Response) => {
     }
 
     interface MarineResponse {
+      current?: {
+        sea_surface_temperature: number;
+      };
       hourly?: {
         time: string[];
         wave_height: number[];
         wave_period: number[];
         swell_wave_direction: number[];
+        sea_surface_temperature: number[];
       };
     }
 
     interface WeatherResponse {
       current: {
+        temperature_2m: number;
+        weather_code: number;
         wind_speed_10m: number;
         wind_direction_10m: number;
       };
@@ -447,16 +496,30 @@ app.get('/surfability', async (req: Request, res: Response) => {
     const swellDirection = buoyData?.swellDirection ?? 
                           marineJson?.hourly?.swell_wave_direction?.[0] ?? 90;
 
+    // Extract new weather data
+    const airTemperature = weatherJson.current.temperature_2m;
+    const weatherCode = weatherJson.current.weather_code;
+    const weatherDescription = getWeatherDescription(weatherCode);
+    
+    // Water temperature from marine API or fallback
+    const waterTemperature = marineJson?.current?.sea_surface_temperature ?? 
+                            marineJson?.hourly?.sea_surface_temperature?.[0] ?? 
+                            22; // Fallback to ~72°F in Celsius
+
     // Debug logging
     console.log('Current conditions source:', {
       buoyData: !!buoyData,
       marineData: !!marineJson?.hourly,
       waveHeight,
       wavePeriod,
-      swellDirection
+      swellDirection,
+      airTemperature,
+      waterTemperature,
+      weatherCode,
+      weatherDescription
     });
 
-    const windSpeed = weatherJson.current.wind_speed_10m * 1.94384; // Convert m/s to knots
+    const windSpeed = weatherJson.current.wind_speed_10m * 0.539957; // Convert to knots
     const windDirection = weatherJson.current.wind_direction_10m;
 
     const tide = getSimpleTideState();
@@ -485,7 +548,7 @@ app.get('/surfability', async (req: Request, res: Response) => {
 
     const conditionsDuration = getConditionsDuration(hourlyForecasts, tide);
 
-    // Response
+    // Response with new weather data
     res.json({
       location: 'St. Augustine, FL',
       timestamp: new Date().toISOString(),
@@ -503,6 +566,14 @@ app.get('/surfability', async (req: Request, res: Response) => {
         data_source: buoyData ? 'NOAA Buoy + Weather API' : (marineJson?.hourly ? 'Marine + Weather API' : 'Weather API + defaults'),
         traditional_rating: rating // Keep the traditional rating for reference
       },
+      weather: {
+        air_temperature_c: Math.round(airTemperature * 10) / 10,
+        air_temperature_f: Math.round((airTemperature * 9/5 + 32) * 10) / 10,
+        water_temperature_c: Math.round(waterTemperature * 10) / 10,
+        water_temperature_f: Math.round((waterTemperature * 9/5 + 32) * 10) / 10,
+        weather_code: weatherCode,
+        weather_description: weatherDescription
+      }
     });
   } catch (err) {
     console.error('API Error:', err);
