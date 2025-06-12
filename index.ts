@@ -373,7 +373,7 @@ function getConditionsDuration(hourlyForecasts: HourlyForecast[], tide: string):
 
   // Generate fun, condition-appropriate messages
   if (maxGoodStreak >= 8) {
-    return 'Good surf for most of the day! 🤙';
+    return 'Good surf for most of the day!';
   } else if (maxGoodStreak >= 6) {
     return `Good surf for ${maxGoodStreak} solid hours!`;
   } else if (maxGoodStreak >= 3) {
