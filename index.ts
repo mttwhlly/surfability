@@ -236,9 +236,9 @@ function parseBuoyData(buoyText: string): { waveHeight: number; swellDirection: 
     console.log('Buoy raw text sample:', buoyText.slice(0, 500));
     
     // Find the header line to understand column positions
-    const headerLine = lines.find(line => line.includes('WVHT') && line.includes('DPD'));
+    const headerLine = lines.find(line => line.includes('WVHT') && (line.includes('SwP') || line.includes('APD')));
     if (!headerLine) {
-      console.log('Could not find header line with WVHT and DPD');
+      console.log('Could not find header line with WVHT and SwP/APD');
       return null;
     }
     
