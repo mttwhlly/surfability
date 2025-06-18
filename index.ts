@@ -4,10 +4,10 @@ import cors from 'cors';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS configuration - this is the key fix!
+// CORS configuration
 const corsOptions = {
   origin: [
-    'https://localhost:8444',  // Your local development
+    'https://localhost:8444',
     'http://localhost:8444',
     'https://localhost:3000',
     'http://localhost:3000',
@@ -21,15 +21,11 @@ const corsOptions = {
   credentials: true
 };
 
-// Apply CORS middleware
 app.use(cors(corsOptions));
-
-// Handle preflight requests
 app.options('*', cors(corsOptions));
-
 app.use(express.json());
 
-// Add additional CORS headers for extra compatibility
+// Additional CORS headers for extra compatibility
 app.use((req: Request, res: Response, next) => {
   res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -50,6 +46,7 @@ interface SurfData {
   windDirection: number;
   windSpeed: number;
   tide: string;
+  tideHeight?: number;
 }
 
 interface WeatherData {
@@ -57,6 +54,13 @@ interface WeatherData {
   waterTemperature: number;
   weatherCode: number;
   weatherDescription: string;
+}
+
+interface TideData {
+  currentHeight: number;
+  state: string;
+  nextHigh: { time: string; height: number } | null;
+  nextLow: { time: string; height: number } | null;
 }
 
 interface SurfabilityResult {
@@ -198,9 +202,16 @@ function calculateSurfability(data: SurfData): SurfabilityResult {
     score += 10; // Light onshore wind
   }
   
-  // Tide scoring
+  // Tide scoring - enhanced with actual tide data
   if (data.tide === 'Mid' || data.tide === 'Rising' || data.tide === 'Falling') {
     score += 10;
+  }
+  
+  // Bonus points for optimal tide height (mid-range)
+  if (data.tideHeight !== undefined) {
+    if (data.tideHeight >= 0.5 && data.tideHeight <= 2.5) {
+      score += 5; // Optimal tide height for surfing
+    }
   }
 
   let rating: string;
@@ -222,7 +233,7 @@ function calculateSurfability(data: SurfData): SurfabilityResult {
 
   return {
     score,
-    surfable: score >= 45, // Raised threshold - only call it surfable if it's actually decent
+    surfable: score >= 45,
     rating,
     funRating,
   };
@@ -256,7 +267,6 @@ function parseBuoyData(buoyText: string): { waveHeight: number; swellDirection: 
     
     if (!dataLine) {
       console.log('Could not find valid data line');
-      console.log('Available lines:', lines.slice(0, 10));
       return null;
     }
     
@@ -269,18 +279,10 @@ function parseBuoyData(buoyText: string): { waveHeight: number; swellDirection: 
       return null;
     }
     
-    // NDBC format from your buoy URL: YY MM DD hh mm WVHT DPD APD MWD PRES ATMP WTMP DEW VIS
-    // Looking at the actual data format from the fetch:
-    // #YY  MM DD hh mm WVHT  SwH  SwP  WWH  WWP SwD WWD  STEEPNESS  APD MWD
-    // #yr  mo dy hr mn    m    m  sec    m  sec  -  degT     -      sec degT
-    // 2025 06 13 20 26  0.8  0.2 10.5  0.7  8.3   E   E        N/A  4.1  98
-    
-    // So the columns are:
-    // 0=year, 1=month, 2=day, 3=hour, 4=minute, 5=WVHT(m), 6=SwH(m), 7=SwP(sec), 8=WWH(m), 9=WWP(sec), 10=SwD, 11=WWD, 12=STEEPNESS, 13=APD(sec), 14=MWD(degT)
-    
+    // NDBC format: YY MM DD hh mm WVHT SwH SwP WWH WWP SwD WWD STEEPNESS APD MWD
     const waveHeightMeters = parseFloat(parts[5]); // WVHT (significant wave height in meters)
     const swellPeriod = parseFloat(parts[7]);      // SwP (swell wave period in seconds)  
-    const swellDirection = parseFloat(parts[14]);  // MWD (mean wave direction in degrees) - this is at the end
+    const swellDirection = parseFloat(parts[14]);  // MWD (mean wave direction in degrees)
     
     // If swell period is not available or invalid, try using APD (average period)
     let wavePeriod = swellPeriod;
@@ -320,16 +322,129 @@ function parseBuoyData(buoyText: string): { waveHeight: number; swellDirection: 
   }
 }
 
-function getSimpleTideState(): string {
-  // Simple tide calculation based on time of day
-  // This is a placeholder - ideally you'd use a real tide API
-  const hour = new Date().getHours();
-  const tidePhase = hour % 12;
-  
-  if (tidePhase < 2 || tidePhase > 10) return 'Low';
-  else if (tidePhase >= 5 && tidePhase <= 7) return 'High';
-  else if (tidePhase < 5) return 'Rising';
-  else return 'Falling';
+async function fetchTideData(): Promise<TideData> {
+  try {
+    // St. Augustine Beach, FL station (closer to surf spot)
+    const stationId = '8720587';
+    
+    // Get current water level (latest observation)
+    const currentUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?date=latest&station=${stationId}&product=water_level&datum=MLLW&time_zone=lst_ldt&units=english&application=SurfLab&format=json`;
+    
+    // Get high/low predictions for today and tomorrow  
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const formatDate = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}${month}${day}`;
+    };
+    
+    const predictionsUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?begin_date=${formatDate(today)}&end_date=${formatDate(tomorrow)}&station=${stationId}&product=predictions&datum=MLLW&time_zone=lst_ldt&interval=hilo&units=english&application=SurfLab&format=json`;
+    
+    console.log('Fetching tide data from:', { currentUrl, predictionsUrl });
+    
+    // Fetch both current level and predictions
+    const [currentRes, predictionsRes] = await Promise.all([
+      fetch(currentUrl, { signal: AbortSignal.timeout(8000) }),
+      fetch(predictionsUrl, { signal: AbortSignal.timeout(8000) })
+    ]);
+    
+    let currentHeight = 0;
+    let nextHigh: { time: string; height: number } | null = null;
+    let nextLow: { time: string; height: number } | null = null;
+    
+    // Parse current water level
+    if (currentRes.ok) {
+      const currentData = await currentRes.json();
+      if (currentData.data && currentData.data.length > 0) {
+        currentHeight = parseFloat(currentData.data[0].v);
+        console.log('Current tide height:', currentHeight, 'ft MLLW');
+      }
+    } else {
+      console.warn('Failed to fetch current water level:', currentRes.status);
+    }
+    
+    // Parse tide predictions
+    if (predictionsRes.ok) {
+      const predictionsData = await predictionsRes.json();
+      if (predictionsData.predictions && predictionsData.predictions.length > 0) {
+        const now = new Date();
+        
+        for (const prediction of predictionsData.predictions) {
+          const predictionTime = new Date(prediction.t);
+          
+          if (predictionTime > now) {
+            if (prediction.type === 'H' && !nextHigh) {
+              nextHigh = {
+                time: prediction.t,
+                height: parseFloat(prediction.v)
+              };
+            } else if (prediction.type === 'L' && !nextLow) {
+              nextLow = {
+                time: prediction.t,
+                height: parseFloat(prediction.v)
+              };
+            }
+            
+            // Break once we have both next high and low
+            if (nextHigh && nextLow) break;
+          }
+        }
+        
+        console.log('Next tide predictions:', { nextHigh, nextLow });
+      }
+    } else {
+      console.warn('Failed to fetch tide predictions:', predictionsRes.status);
+    }
+    
+    // Determine tide state
+    let state = 'Unknown';
+    const now = new Date();
+    
+    if (nextHigh && nextLow) {
+      const timeToHigh = nextHigh ? new Date(nextHigh.time).getTime() - now.getTime() : Infinity;
+      const timeToLow = nextLow ? new Date(nextLow.time).getTime() - now.getTime() : Infinity;
+      
+      if (timeToHigh < timeToLow) {
+        // Next event is high tide, so we're rising
+        state = currentHeight > 1.5 ? 'High Rising' : 'Rising';
+      } else {
+        // Next event is low tide, so we're falling
+        state = currentHeight < 1.0 ? 'Low Falling' : 'Falling';
+      }
+      
+      // Determine if we're at mid-tide
+      if (nextHigh && nextLow) {
+        const range = Math.abs(nextHigh.height - nextLow.height);
+        const midPoint = (nextHigh.height + nextLow.height) / 2;
+        
+        if (Math.abs(currentHeight - midPoint) < range * 0.25) {
+          state = 'Mid';
+        }
+      }
+    }
+    
+    return {
+      currentHeight,
+      state,
+      nextHigh,
+      nextLow
+    };
+    
+  } catch (error) {
+    console.error('Error fetching tide data:', error);
+    
+    // Return fallback data
+    return {
+      currentHeight: 1.5,
+      state: 'Mid',
+      nextHigh: null,
+      nextLow: null
+    };
+  }
 }
 
 function getConditionsDuration(hourlyForecasts: HourlyForecast[], tide: string): string {
@@ -432,6 +547,10 @@ app.get('/surfability', async (req: Request, res: Response) => {
   try {
     console.log('Surfability request from:', req.headers.origin);
     
+    // Fetch real tide data
+    const tideData = await fetchTideData();
+    console.log('Tide data fetched:', tideData);
+    
     // Fetch buoy data with error handling
     let buoyData = null;
     try {
@@ -521,7 +640,7 @@ app.get('/surfability', async (req: Request, res: Response) => {
     const swellDirection = buoyData?.swellDirection ?? 
                           marineJson?.hourly?.swell_wave_direction?.[0] ?? 90;
 
-    // Extract new weather data
+    // Extract weather data
     const airTemperature = weatherJson.current.temperature_2m;
     const weatherCode = weatherJson.current.weather_code;
     const weatherDescription = getWeatherDescription(weatherCode);
@@ -535,6 +654,7 @@ app.get('/surfability', async (req: Request, res: Response) => {
     console.log('Current conditions source:', {
       buoyData: !!buoyData,
       marineData: !!marineJson?.hourly,
+      tideData: tideData.state,
       waveHeight,
       wavePeriod,
       swellDirection,
@@ -547,16 +667,15 @@ app.get('/surfability', async (req: Request, res: Response) => {
     const windSpeed = weatherJson.current.wind_speed_10m * 0.539957; // Convert to knots
     const windDirection = weatherJson.current.wind_direction_10m;
 
-    const tide = getSimpleTideState();
-
-    // Current surf conditions
+    // Current surf conditions with real tide data
     const currentSurfData: SurfData = {
       waveHeight,
       wavePeriod,
       swellDirection,
       windDirection,
       windSpeed,
-      tide,
+      tide: tideData.state,
+      tideHeight: tideData.currentHeight,
     };
 
     const { score, surfable, rating, funRating } = calculateSurfability(currentSurfData);
@@ -564,31 +683,49 @@ app.get('/surfability', async (req: Request, res: Response) => {
     // Parse hourly forecast - combine available data
     const hourlyForecasts: HourlyForecast[] = weatherJson.hourly.time.map((timeStr: string, i: number) => ({
       time: timeStr,
-      wave_height: marineJson?.hourly?.wave_height?.[i] ?? 1.5, // Use more realistic default
-      wave_period: marineJson?.hourly?.wave_period?.[i] ?? 6,   // Use more realistic default  
-      swell_direction: marineJson?.hourly?.swell_wave_direction?.[i] ?? 90, // Default East
+      wave_height: marineJson?.hourly?.wave_height?.[i] ?? 1.5,
+      wave_period: marineJson?.hourly?.wave_period?.[i] ?? 6,
+      swell_direction: marineJson?.hourly?.swell_wave_direction?.[i] ?? 90,
       wind_speed: weatherJson.hourly.wind_speed_10m[i],
       wind_direction: weatherJson.hourly.wind_direction_10m[i],
     }));
 
-    const conditionsDuration = getConditionsDuration(hourlyForecasts, tide);
+    const conditionsDuration = getConditionsDuration(hourlyForecasts, tideData.state);
 
-    // Response with new weather data
+    // Format next tide times for human readability
+    const formatTideTime = (tideEvent: { time: string; height: number } | null) => {
+      if (!tideEvent) return null;
+      
+      const time = new Date(tideEvent.time);
+      const timeStr = time.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      
+      return {
+        time: timeStr,
+        height: Math.round(tideEvent.height * 10) / 10
+      };
+    };
+
+    // Response with real tide data
     res.json({
       location: 'St. Augustine, FL',
       timestamp: new Date().toISOString(),
       surfable,
-      rating: funRating, // Use the fun rating as the main rating
+      rating: funRating,
       score,
-      goodSurfDuration: conditionsDuration, // Renamed to be more accurate
+      goodSurfDuration: conditionsDuration,
       details: {
         wave_height_ft: Math.round(currentSurfData.waveHeight * 10) / 10,
         wave_period_sec: Math.round(currentSurfData.wavePeriod * 10) / 10,
         swell_direction_deg: Math.round(currentSurfData.swellDirection),
         wind_direction_deg: Math.round(currentSurfData.windDirection),
         wind_speed_kts: Math.round(currentSurfData.windSpeed * 10) / 10,
-        tide_state: tide,
-        data_source: buoyData ? 'NOAA Buoy + Weather API' : (marineJson?.hourly ? 'Marine + Weather API' : 'Weather API + defaults'),
+        tide_state: tideData.state,
+        tide_height_ft: Math.round(tideData.currentHeight * 10) / 10,
+        data_source: buoyData ? 'NOAA Buoy + NOAA Tides + Weather API' : (marineJson?.hourly ? 'Marine + NOAA Tides + Weather API' : 'Weather API + NOAA Tides + defaults'),
         traditional_rating: rating // Keep the traditional rating for reference
       },
       weather: {
@@ -598,6 +735,13 @@ app.get('/surfability', async (req: Request, res: Response) => {
         water_temperature_f: Math.round((waterTemperature * 9/5 + 32) * 10) / 10,
         weather_code: weatherCode,
         weather_description: weatherDescription
+      },
+      tides: {
+        current_height_ft: Math.round(tideData.currentHeight * 10) / 10,
+        state: tideData.state,
+        next_high: formatTideTime(tideData.nextHigh),
+        next_low: formatTideTime(tideData.nextLow),
+        station: 'NOAA 8720587 (St. Augustine Beach, FL)'
       }
     });
   } catch (err) {
@@ -617,4 +761,5 @@ app.get('/health', (_req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`Surfability API running on port ${PORT}`);
   console.log('CORS enabled for local development');
+  console.log('Real NOAA tide data integration enabled');
 });
