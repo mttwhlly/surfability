@@ -344,7 +344,9 @@ async function fetchTideData(): Promise<TideData> {
     
     const predictionsUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?begin_date=${formatDate(today)}&end_date=${formatDate(tomorrow)}&station=${stationId}&product=predictions&datum=MLLW&time_zone=lst_ldt&interval=hilo&units=english&application=SurfLab&format=json`;
     
-    console.log('Fetching tide data from:', { currentUrl, predictionsUrl });
+    console.log('🌊 Fetching tide data from URLs:');
+    console.log('📍 Current level URL:', currentUrl);
+    console.log('📅 Predictions URL:', predictionsUrl);
     
     // Fetch both current level and predictions
     const [currentRes, predictionsRes] = await Promise.all([
@@ -356,25 +358,45 @@ async function fetchTideData(): Promise<TideData> {
     let nextHigh: { time: string; height: number } | null = null;
     let nextLow: { time: string; height: number } | null = null;
     
-    // Parse current water level
+    // Parse current water level with detailed debugging
+    console.log('📊 Current water level response status:', currentRes.status);
     if (currentRes.ok) {
       const currentData = await currentRes.json();
+      console.log('📊 Current water level raw response:', JSON.stringify(currentData, null, 2));
+      
       if (currentData.data && currentData.data.length > 0) {
-        currentHeight = parseFloat(currentData.data[0].v);
-        console.log('Current tide height:', currentHeight, 'ft MLLW');
+        const rawValue = currentData.data[0].v;
+        currentHeight = parseFloat(rawValue);
+        console.log('📊 Current tide height raw value:', rawValue);
+        console.log('📊 Current tide height parsed:', currentHeight);
+        console.log('📊 Current tide height type:', typeof currentHeight);
+        console.log('📊 Is currentHeight NaN?', isNaN(currentHeight));
+      } else {
+        console.log('❌ No current water level data in response');
+        console.log('📊 Current data structure:', currentData);
       }
     } else {
-      console.warn('Failed to fetch current water level:', currentRes.status);
+      console.warn('❌ Failed to fetch current water level. Status:', currentRes.status);
+      const errorText = await currentRes.text();
+      console.log('❌ Error response:', errorText);
     }
     
-    // Parse tide predictions
+    // Parse tide predictions with detailed debugging
+    console.log('📈 Tide predictions response status:', predictionsRes.status);
     if (predictionsRes.ok) {
       const predictionsData = await predictionsRes.json();
+      console.log('📈 Predictions raw response:', JSON.stringify(predictionsData, null, 2));
+      
       if (predictionsData.predictions && predictionsData.predictions.length > 0) {
         const now = new Date();
+        console.log('📈 Current time for filtering:', now.toISOString());
+        
+        // Show first few predictions for debugging
+        console.log('📈 First 5 predictions:', predictionsData.predictions.slice(0, 5));
         
         for (const prediction of predictionsData.predictions) {
           const predictionTime = new Date(prediction.t);
+          console.log(`📈 Checking prediction: ${prediction.t} (${prediction.type}) - ${prediction.v} ft`);
           
           if (predictionTime > now) {
             if (prediction.type === 'H' && !nextHigh) {
@@ -382,68 +404,95 @@ async function fetchTideData(): Promise<TideData> {
                 time: prediction.t,
                 height: parseFloat(prediction.v)
               };
+              console.log('⬆️ Found next high tide:', nextHigh);
             } else if (prediction.type === 'L' && !nextLow) {
               nextLow = {
                 time: prediction.t,
                 height: parseFloat(prediction.v)
               };
+              console.log('⬇️ Found next low tide:', nextLow);
             }
             
             // Break once we have both next high and low
-            if (nextHigh && nextLow) break;
+            if (nextHigh && nextLow) {
+              console.log('✅ Found both next high and low tides, stopping search');
+              break;
+            }
           }
         }
         
-        console.log('Next tide predictions:', { nextHigh, nextLow });
+        console.log('📈 Final tide predictions found:', { nextHigh, nextLow });
+      } else {
+        console.log('❌ No predictions data in response');
+        console.log('📈 Predictions structure:', predictionsData);
       }
     } else {
-      console.warn('Failed to fetch tide predictions:', predictionsRes.status);
+      console.warn('❌ Failed to fetch tide predictions. Status:', predictionsRes.status);
+      const errorText = await predictionsRes.text();
+      console.log('❌ Predictions error response:', errorText);
     }
     
-    // Determine tide state
+    // Determine tide state with debugging
     let state = 'Unknown';
     const now = new Date();
     
     if (nextHigh && nextLow) {
-      const timeToHigh = nextHigh ? new Date(nextHigh.time).getTime() - now.getTime() : Infinity;
-      const timeToLow = nextLow ? new Date(nextLow.time).getTime() - now.getTime() : Infinity;
+      const timeToHigh = new Date(nextHigh.time).getTime() - now.getTime();
+      const timeToLow = new Date(nextLow.time).getTime() - now.getTime();
+      
+      console.log('⏰ Time to next high tide (ms):', timeToHigh);
+      console.log('⏰ Time to next low tide (ms):', timeToLow);
       
       if (timeToHigh < timeToLow) {
         // Next event is high tide, so we're rising
         state = currentHeight > 1.5 ? 'High Rising' : 'Rising';
+        console.log('📈 Tide is rising, state:', state);
       } else {
         // Next event is low tide, so we're falling
         state = currentHeight < 1.0 ? 'Low Falling' : 'Falling';
+        console.log('📉 Tide is falling, state:', state);
       }
       
       // Determine if we're at mid-tide
-      if (nextHigh && nextLow) {
-        const range = Math.abs(nextHigh.height - nextLow.height);
-        const midPoint = (nextHigh.height + nextLow.height) / 2;
-        
-        if (Math.abs(currentHeight - midPoint) < range * 0.25) {
-          state = 'Mid';
-        }
+      const range = Math.abs(nextHigh.height - nextLow.height);
+      const midPoint = (nextHigh.height + nextLow.height) / 2;
+      const distanceFromMid = Math.abs(currentHeight - midPoint);
+      
+      console.log('📊 Tide range:', range);
+      console.log('📊 Mid point:', midPoint);
+      console.log('📊 Distance from mid:', distanceFromMid);
+      console.log('📊 Mid threshold:', range * 0.25);
+      
+      if (distanceFromMid < range * 0.25) {
+        state = 'Mid';
+        console.log('📊 Overriding to Mid tide');
       }
+    } else {
+      console.log('❌ Cannot determine tide state - missing high/low predictions');
     }
     
-    return {
+    const finalTideData = {
       currentHeight,
       state,
       nextHigh,
       nextLow
     };
     
-  } catch (error) {
-    console.error('Error fetching tide data:', error);
+    console.log('🌊 Final tide data being returned:', finalTideData);
+    return finalTideData;
     
-    // Return fallback data
-    return {
+  } catch (error) {
+    console.error('❌ Error fetching tide data:', error);
+    
+    // Return fallback data with debugging
+    const fallbackData = {
       currentHeight: 1.5,
       state: 'Mid',
       nextHigh: null,
       nextLow: null
     };
+    console.log('🔄 Returning fallback tide data:', fallbackData);
+    return fallbackData;
   }
 }
 
