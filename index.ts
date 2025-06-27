@@ -61,6 +61,8 @@ interface TideData {
   state: string;
   nextHigh: { time: string; height: number } | null;
   nextLow: { time: string; height: number } | null;
+  previousHigh: { time: string; height: number } | null;
+  previousLow: { time: string; height: number } | null;
 }
 
 interface SurfabilityResult {
@@ -330,8 +332,10 @@ async function fetchTideData(): Promise<TideData> {
     // First try to get current water level (latest observation)
     const currentUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?date=latest&station=${stationId}&product=water_level&datum=MLLW&time_zone=lst_ldt&units=english&application=SurfLab&format=json`;
     
-    // Get high/low predictions for today and tomorrow  
+    // Get high/low predictions for yesterday, today and tomorrow to find previous tides
     const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
     
@@ -342,14 +346,15 @@ async function fetchTideData(): Promise<TideData> {
       return `${year}${month}${day}`;
     };
     
-    const predictionsUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?begin_date=${formatDate(today)}&end_date=${formatDate(tomorrow)}&station=${stationId}&product=predictions&datum=MLLW&time_zone=lst_ldt&interval=hilo&units=english&application=SurfLab&format=json`;
+    // Extended date range to capture previous tides
+    const predictionsUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?begin_date=${formatDate(yesterday)}&end_date=${formatDate(tomorrow)}&station=${stationId}&product=predictions&datum=MLLW&time_zone=lst_ldt&interval=hilo&units=english&application=SurfLab&format=json`;
     
     // Also get 6-minute predictions for current interpolation
     const currentPredictionsUrl = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?date=today&station=${stationId}&product=predictions&datum=MLLW&time_zone=lst_ldt&units=english&application=SurfLab&format=json`;
     
-    console.log('🌊 Fetching tide data from URLs:');
+    console.log('🌊 Fetching enhanced tide data from URLs:');
     console.log('📍 Current level URL:', currentUrl);
-    console.log('📅 High/Low predictions URL:', predictionsUrl);
+    console.log('📅 High/Low predictions URL (yesterday-tomorrow):', predictionsUrl);
     console.log('📊 Current predictions URL:', currentPredictionsUrl);
     
     // Fetch all three endpoints
@@ -362,6 +367,8 @@ async function fetchTideData(): Promise<TideData> {
     let currentHeight = 0;
     let nextHigh: { time: string; height: number } | null = null;
     let nextLow: { time: string; height: number } | null = null;
+    let previousHigh: { time: string; height: number } | null = null;
+    let previousLow: { time: string; height: number } | null = null;
     
     // Try to get current water level from observations first
     console.log('📊 Current water level response status:', currentRes.status);
@@ -412,7 +419,7 @@ async function fetchTideData(): Promise<TideData> {
       }
     }
     
-    // Parse high/low tide predictions
+    // Parse high/low tide predictions for past and future
     console.log('📈 Tide predictions response status:', predictionsRes.status);
     if (predictionsRes.ok) {
       const predictionsData = await predictionsRes.json();
@@ -420,31 +427,52 @@ async function fetchTideData(): Promise<TideData> {
       if (predictionsData.predictions && predictionsData.predictions.length > 0) {
         const now = new Date();
         
-        for (const prediction of predictionsData.predictions) {
-          const predictionTime = new Date(prediction.t);
+        // Separate past and future predictions
+        const pastPredictions = predictionsData.predictions.filter((p: any) => new Date(p.t) < now);
+        const futurePredictions = predictionsData.predictions.filter((p: any) => new Date(p.t) >= now);
+        
+        // Find most recent previous high and low
+        for (let i = pastPredictions.length - 1; i >= 0; i--) {
+          const prediction = pastPredictions[i];
           
-          if (predictionTime > now) {
-            if (prediction.type === 'H' && !nextHigh) {
-              nextHigh = {
-                time: prediction.t,
-                height: parseFloat(prediction.v)
-              };
-            } else if (prediction.type === 'L' && !nextLow) {
-              nextLow = {
-                time: prediction.t,
-                height: parseFloat(prediction.v)
-              };
-            }
-            
-            if (nextHigh && nextLow) break;
+          if (prediction.type === 'H' && !previousHigh) {
+            previousHigh = {
+              time: prediction.t,
+              height: parseFloat(prediction.v)
+            };
+          } else if (prediction.type === 'L' && !previousLow) {
+            previousLow = {
+              time: prediction.t,
+              height: parseFloat(prediction.v)
+            };
           }
+          
+          if (previousHigh && previousLow) break;
         }
         
-        console.log('📈 Next tide predictions:', { nextHigh, nextLow });
+        // Find next high and low (existing logic)
+        for (const prediction of futurePredictions) {
+          if (prediction.type === 'H' && !nextHigh) {
+            nextHigh = {
+              time: prediction.t,
+              height: parseFloat(prediction.v)
+            };
+          } else if (prediction.type === 'L' && !nextLow) {
+            nextLow = {
+              time: prediction.t,
+              height: parseFloat(prediction.v)
+            };
+          }
+          
+          if (nextHigh && nextLow) break;
+        }
+        
+        console.log('📈 Previous tide events:', { previousHigh, previousLow });
+        console.log('📈 Next tide events:', { nextHigh, nextLow });
       }
     }
     
-    // Determine tide state
+    // Determine tide state (existing logic)
     let state = 'Unknown';
     const now = new Date();
     
@@ -453,10 +481,8 @@ async function fetchTideData(): Promise<TideData> {
       const timeToLow = new Date(nextLow.time).getTime() - now.getTime();
       
       if (timeToHigh < timeToLow) {
-        // Next event is high tide, so we're rising
         state = currentHeight > 1.5 ? 'High Rising' : 'Rising';
       } else {
-        // Next event is low tide, so we're falling
         state = currentHeight < 1.0 ? 'Low Falling' : 'Falling';
       }
       
@@ -473,11 +499,10 @@ async function fetchTideData(): Promise<TideData> {
     if (currentHeight === 0) {
       console.log('📊 🔄 Using fallback current height calculation');
       if (nextHigh && nextLow) {
-        // Estimate current height based on mid-point of next high/low
         currentHeight = (nextHigh.height + nextLow.height) / 2;
         console.log(`📊 ✅ Estimated current height: ${currentHeight} ft`);
       } else {
-        currentHeight = 1.5; // Final fallback
+        currentHeight = 1.5;
         console.log('📊 ⚠️ Using absolute fallback height: 1.5 ft');
       }
     }
@@ -486,10 +511,12 @@ async function fetchTideData(): Promise<TideData> {
       currentHeight,
       state,
       nextHigh,
-      nextLow
+      nextLow,
+      previousHigh,
+      previousLow
     };
     
-    console.log('🌊 Final tide data being returned:', finalTideData);
+    console.log('🌊 Final enhanced tide data being returned:', finalTideData);
     return finalTideData;
     
   } catch (error) {
@@ -500,7 +527,9 @@ async function fetchTideData(): Promise<TideData> {
       currentHeight: 1.5,
       state: 'Mid',
       nextHigh: null,
-      nextLow: null
+      nextLow: null,
+      previousHigh: null,
+      previousLow: null
     };
     console.log('🔄 Returning fallback tide data:', fallbackData);
     return fallbackData;
@@ -765,7 +794,8 @@ app.get('/surfability', async (req: Request, res: Response) => {
       
       return {
         time: timeStr,
-        height: Math.round(tideEvent.height * 10) / 10
+        height: Math.round(tideEvent.height * 10) / 10,
+        timestamp: tideEvent.time // Include full timestamp for chart plotting
       };
     };
 
@@ -801,8 +831,17 @@ app.get('/surfability', async (req: Request, res: Response) => {
         state: tideData.state,
         next_high: formatTideTime(tideData.nextHigh),
         next_low: formatTideTime(tideData.nextLow),
-        station: 'NOAA 8720587 (St. Augustine Beach, FL)'
-      }
+        previous_high: formatTideTime(tideData.previousHigh),
+        previous_low: formatTideTime(tideData.previousLow),
+        station: 'NOAA 8720587 (St. Augustine Beach, FL)',
+        // Optional: Add tide range and cycle info
+        cycle_info: {
+          range_ft: tideData.nextHigh && tideData.nextLow ? 
+            Math.round((tideData.nextHigh.height - tideData.nextLow.height) * 10) / 10 : null,
+          cycle_duration_hours: tideData.previousHigh && tideData.nextHigh ? 
+            Math.round(((new Date(tideData.nextHigh.time).getTime() - new Date(tideData.previousHigh.time).getTime()) / (1000 * 60 * 60)) * 10) / 10 : null
+        }
+      },
     });
   } catch (err) {
     console.error('API Error:', err);
