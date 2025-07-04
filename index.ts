@@ -13,8 +13,7 @@ const corsOptions = {
     'http://localhost:3000',
     'https://127.0.0.1:8444',
     'http://127.0.0.1:8444',
-    // Add your production domain when you deploy
-    // 'https://your-domain.com'
+    'https://yso00ok0wsgg4o80k4o0s0o0.mttwhlly.cc'
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Accept'],
