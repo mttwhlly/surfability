@@ -13,7 +13,8 @@ const corsOptions = {
     'http://localhost:3000',
     'https://127.0.0.1:8444',
     'http://127.0.0.1:8444',
-    'https://yso00ok0wsgg4o80k4o0s0o0.mttwhlly.cc'
+    'https://yso00ok0wsgg4o80k4o0s0o0.mttwhlly.cc',
+    'https://c0cgocok00o40c48c40k8g04.mttwhlly.cc',
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Accept'],
