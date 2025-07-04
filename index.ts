@@ -13,30 +13,29 @@ const corsOptions = {
     'http://localhost:3000',
     'https://127.0.0.1:8444',
     'http://127.0.0.1:8444',
-    'https://yso00ok0wsgg4o80k4o0s0o0.mttwhlly.cc',
-    'https://c0cgocok00o40c48c40k8g04.mttwhlly.cc',
+    'https://yso00ok0wsgg4o80k4o0s0o0.mttwhlly.cc', // Your frontend
+    'https://c0cgocok00o40c48c40k8g04.mttwhlly.cc', // Your API
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Accept'],
-  credentials: true
+  allowedHeaders: [
+    'Content-Type', 
+    'Accept',
+    'Authorization',
+    'X-Requested-With',
+    'Origin'
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 
-// Additional CORS headers for extra compatibility
+// Optional: Add logging for debugging
 app.use((req: Request, res: Response, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
-  }
+  console.log(`📡 ${req.method} ${req.path} from: ${req.headers.origin || 'no-origin'}`);
+  next();
 });
 
 interface SurfData {
