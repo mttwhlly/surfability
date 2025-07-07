@@ -431,60 +431,90 @@ async function fetchTideData(): Promise<TideData> {
       }
     }
     
-    // Parse high/low tide predictions for past and future
+    // Parse high/low tide predictions for past and future - FIXED LOGIC
     console.log('📈 Tide predictions response status:', predictionsRes.status);
     if (predictionsRes.ok) {
       const predictionsData = await predictionsRes.json();
       
       if (predictionsData.predictions && predictionsData.predictions.length > 0) {
         const now = new Date();
+        console.log('🕐 Current time for tide classification:', now.toISOString());
         
-        // Separate past and future predictions
-        const pastPredictions = predictionsData.predictions.filter((p: any) => new Date(p.t) < now);
-        const futurePredictions = predictionsData.predictions.filter((p: any) => new Date(p.t) >= now);
+        // FIXED: Classify tides based on actual current time, not arbitrary date boundaries
+        const allPredictions = predictionsData.predictions.map((p: any) => ({
+          ...p,
+          time: new Date(p.t),
+          parsedHeight: parseFloat(p.v)
+        }));
         
-        // Find most recent previous high and low
+        // Separate ACTUAL past and future based on current time
+        const pastPredictions = allPredictions.filter((p: any) => p.time < now);
+        const futurePredictions = allPredictions.filter((p: any) => p.time >= now);
+        
+        console.log(`📊 Found ${pastPredictions.length} past tides and ${futurePredictions.length} future tides`);
+        
+        // Find most recent previous high and low from ACTUAL past events
         for (let i = pastPredictions.length - 1; i >= 0; i--) {
           const prediction = pastPredictions[i];
           
           if (prediction.type === 'H' && !previousHigh) {
             previousHigh = {
               time: prediction.t,
-              height: parseFloat(prediction.v)
+              height: prediction.parsedHeight
             };
+            console.log('📈 Found previous high:', prediction.t, prediction.parsedHeight + ' ft');
           } else if (prediction.type === 'L' && !previousLow) {
             previousLow = {
               time: prediction.t,
-              height: parseFloat(prediction.v)
+              height: prediction.parsedHeight
             };
+            console.log('📈 Found previous low:', prediction.t, prediction.parsedHeight + ' ft');
           }
           
           if (previousHigh && previousLow) break;
         }
         
-        // Find next high and low (existing logic)
+        // FIXED: Find ACTUAL next high and low from future events only
         for (const prediction of futurePredictions) {
           if (prediction.type === 'H' && !nextHigh) {
             nextHigh = {
               time: prediction.t,
-              height: parseFloat(prediction.v)
+              height: prediction.parsedHeight
             };
+            console.log('📈 Found next high:', prediction.t, prediction.parsedHeight + ' ft');
           } else if (prediction.type === 'L' && !nextLow) {
             nextLow = {
               time: prediction.t,
-              height: parseFloat(prediction.v)
+              height: prediction.parsedHeight
             };
+            console.log('📈 Found next low:', prediction.t, prediction.parsedHeight + ' ft');
           }
           
           if (nextHigh && nextLow) break;
         }
         
-        console.log('📈 Previous tide events:', { previousHigh, previousLow });
-        console.log('📈 Next tide events:', { nextHigh, nextLow });
+        // Log the results for debugging
+        console.log('🔍 CORRECTED tide classification:');
+        if (previousHigh) {
+          const timeDiff = Math.round((now.getTime() - new Date(previousHigh.time).getTime()) / (1000 * 60));
+          console.log(`   Previous High: ${previousHigh.time} (${timeDiff} minutes ago)`);
+        }
+        if (previousLow) {
+          const timeDiff = Math.round((now.getTime() - new Date(previousLow.time).getTime()) / (1000 * 60));
+          console.log(`   Previous Low: ${previousLow.time} (${timeDiff} minutes ago)`);
+        }
+        if (nextHigh) {
+          const timeDiff = Math.round((new Date(nextHigh.time).getTime() - now.getTime()) / (1000 * 60));
+          console.log(`   Next High: ${nextHigh.time} (in ${timeDiff} minutes)`);
+        }
+        if (nextLow) {
+          const timeDiff = Math.round((new Date(nextLow.time).getTime() - now.getTime()) / (1000 * 60));
+          console.log(`   Next Low: ${nextLow.time} (in ${timeDiff} minutes)`);
+        }
       }
     }
     
-    // Determine tide state (existing logic)
+    // Determine tide state using corrected logic
     let state = 'Unknown';
     const now = new Date();
     
@@ -493,8 +523,10 @@ async function fetchTideData(): Promise<TideData> {
       const timeToLow = new Date(nextLow.time).getTime() - now.getTime();
       
       if (timeToHigh < timeToLow) {
+        // Next event is high tide
         state = currentHeight > 1.5 ? 'High Rising' : 'Rising';
       } else {
+        // Next event is low tide
         state = currentHeight < 1.0 ? 'Low Falling' : 'Falling';
       }
       
@@ -505,6 +537,8 @@ async function fetchTideData(): Promise<TideData> {
       if (Math.abs(currentHeight - midPoint) < range * 0.25) {
         state = 'Mid';
       }
+      
+      console.log(`🌊 Tide state determined: ${state} (next high in ${Math.round(timeToHigh/(1000*60))} min, next low in ${Math.round(timeToLow/(1000*60))} min)`);
     }
     
     // Final fallback if we still don't have current height
@@ -528,7 +562,7 @@ async function fetchTideData(): Promise<TideData> {
       previousLow
     };
     
-    console.log('🌊 Final enhanced tide data being returned:', finalTideData);
+    console.log('🌊 Final CORRECTED tide data being returned:', finalTideData);
     return finalTideData;
     
   } catch (error) {
